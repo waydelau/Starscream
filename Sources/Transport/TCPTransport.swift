@@ -105,8 +105,18 @@ public class TCPTransport: Transport {
             switch newState {
             case .ready:
                 self?.delegate?.connectionChanged(state: .connected)
-            case .waiting:
-                self?.delegate?.connectionChanged(state: .waiting)
+            case .waiting(let error):
+                switch error {
+                case .posix(let errorCode):
+                    // handle timeout and network unreachable
+                    if(errorCode == .ETIMEDOUT || errorCode == .ENETDOWN || errorCode == .ENETUNREACH) {
+                        self?.delegate?.connectionChanged(state: .failed(error))
+                    }else{
+                        self?.delegate?.connectionChanged(state: .waiting)
+                    }
+                default:
+                    self?.delegate?.connectionChanged(state: .waiting)
+                }
             case .cancelled:
                 self?.delegate?.connectionChanged(state: .cancelled)
             case .failed(let error):
@@ -144,6 +154,13 @@ public class TCPTransport: Transport {
             
             // Refer to https://developer.apple.com/documentation/network/implementing_netcat_with_network_framework
             if let context = context, context.isFinal, isComplete {
+                if let delegate = s.delegate {
+                    // Let the owner of this TCPTransport decide what to do next: disconnect or reconnect?
+                    delegate.connectionChanged(state: .peerClosed)
+                } else {
+                    // No use to keep connection alive
+                    s.disconnect()
+                }
                 return
             }
             
